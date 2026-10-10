@@ -16,42 +16,45 @@ async def handler(websocket):
     t_wake = 0
     t_first_byte = 0
     
-    async for message in websocket:
-        # Check if the message is a text command (like WAKE)
-        if isinstance(message, str):
-            if message.startswith("WAKE:"):
-                # Using the server's time for accurate latency calculation
-                t_wake = time.time() * 1000
-                esp32_millis = message.split(":")[1]
-                print(f"\n[LATENCY] WAKE triggered at {t_wake:.0f} ms (ESP32 time: {esp32_millis})")
-                t_first_byte = 0 # reset for the new stream
-                
-        # Check if the message is raw binary audio data
-        elif isinstance(message, bytes):
-            # Record the time the first byte arrives after a wake
-            if t_first_byte == 0 and t_wake != 0:
-                t_first_byte = time.time() * 1000
-                wake_to_network_latency = t_first_byte - t_wake
-                print(f"[LATENCY] Wake-to-Network Latency: {wake_to_network_latency:.2f} ms")
-            
-            # Feed the audio bytes into the Vosk recognizer
-            if rec.AcceptWaveform(message):
-                result = json.loads(rec.Result())
-                if result.get("text"):
-                    print(f"Final Sentence: {result['text']}")
+    try:
+        async for message in websocket:
+            # Check if the message is a text command (like WAKE)
+            if isinstance(message, str):
+                if message.startswith("WAKE:"):
+                    # Using the server's time for accurate latency calculation
+                    t_wake = time.time() * 1000
+                    esp32_millis = message.split(":")[1]
+                    print(f"\n[LATENCY] WAKE triggered at {t_wake:.0f} ms (ESP32 time: {esp32_millis})")
+                    t_first_byte = 0 # reset for the new stream
                     
-                    if t_wake != 0:
-                        t_end = time.time() * 1000
-                        total_latency = t_end - t_wake
-                        print(f"[LATENCY] Total Pipeline Latency: {total_latency:.2f} ms")
+            # Check if the message is raw binary audio data
+            elif isinstance(message, bytes):
+                # Record the time the first byte arrives after a wake
+                if t_first_byte == 0 and t_wake != 0:
+                    t_first_byte = time.time() * 1000
+                    wake_to_network_latency = t_first_byte - t_wake
+                    print(f"[LATENCY] Wake-to-Network Latency: {wake_to_network_latency:.2f} ms")
+                
+                # Feed the audio bytes into the Vosk recognizer
+                if rec.AcceptWaveform(message):
+                    result = json.loads(rec.Result())
+                    if result.get("text"):
+                        print(f"Final Sentence: {result['text']}")
                         
-                    # Reset wake tracker until next wake
-                    t_wake = 0 
-            else:
-                partial = json.loads(rec.PartialResult())
-                if partial.get("partial"):
-                    # Print partials on the same line to reduce terminal clutter
-                    print(f"Hearing: {partial['partial']}          ", end="\r")
+                        if t_wake != 0:
+                            t_end = time.time() * 1000
+                            total_latency = t_end - t_wake
+                            print(f"[LATENCY] Total Pipeline Latency: {total_latency:.2f} ms")
+                            
+                        # Reset wake tracker until next wake
+                        t_wake = 0 
+                else:
+                    partial = json.loads(rec.PartialResult())
+                    if partial.get("partial"):
+                        # Print partials on the same line to reduce terminal clutter
+                        print(f"Hearing: {partial['partial']}          ", end="\r")
+    except websockets.exceptions.ConnectionClosed:
+        print("\nDevice disconnected.")
 
 async def main():
     async with websockets.serve(handler, "0.0.0.0", 8766):
